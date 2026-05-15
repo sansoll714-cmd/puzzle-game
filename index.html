@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>과일 짝맞추기 퍼즐</title>
+  <link rel="icon" type="image/svg+xml" href="./assets/images/favicon.svg">
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <main class="app">
+    <section class="panel">
+      <p class="eyebrow">Memory Puzzle</p>
+      <h1>과일 짝맞추기</h1>
+      <p class="description">
+        같은 과일 카드 2장을 찾아 4x4 보드를 모두 완성해 보세요.
+      </p>
+
+      <div class="status-board">
+        <div class="status-card">
+          <span class="status-label">시도 횟수</span>
+          <strong id="attempts">0</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">걸린 시간</span>
+          <strong id="elapsedTime">00:00</strong>
+        </div>
+        <div class="status-card">
+          <span class="status-label">정확도</span>
+          <strong id="accuracy">0%</strong>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="restartButton" type="button">새 게임</button>
+      </div>
+
+      <div class="ranking-entry">
+        <label class="status-label" for="playerName">플레이어 이름</label>
+        <input
+          id="playerName"
+          class="player-name-input"
+          type="text"
+          maxlength="12"
+          placeholder="이름을 입력하세요"
+          value="PLAYER"
+        >
+      </div>
+
+      <p id="message" class="message" aria-live="polite">
+        카드를 눌러 게임을 시작하세요.
+      </p>
+
+      <section class="ranking-panel" aria-labelledby="rankingTitle">
+        <div class="ranking-header">
+          <h2 id="rankingTitle">랭킹</h2>
+          <button id="clearRankingButton" class="secondary-button" type="button">기록 삭제</button>
+        </div>
+        <ol id="rankingList" class="ranking-list"></ol>
+      </section>
+    </section>
+
+    <section class="game-area" aria-label="과일 퍼즐 보드">
+      <div
+        id="gameBoard"
+        class="game-board"
+        role="grid"
+        aria-label="4x4 과일 짝맞추기 보드"
+      ></div>
+    </section>
+  </main>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
