@@ -1,374 +1,344 @@
-import {
-  shuffle,
-  formatElapsedTime,
-  formatAccuracy,
-  sanitizePlayerName,
-  formatRankingDate,
-} from "./utils.js";
-import { renderBoard } from "./board.js";
+(function () {
+  const {
+    shuffle,
+    formatElapsedTime,
+    formatAccuracy,
+  } = window.MemoryPuzzleUtils;
+  const { renderBoard } = window.MemoryPuzzleBoard;
 
-// 게임 상태, 이벤트, 랭킹을 한곳에서 관리하는 메인 클래스다.
-export class MemoryPuzzleGame {
-  constructor({
-    boardElement,
-    attemptsElement,
-    elapsedTimeElement,
-    accuracyElement,
-    messageElement,
-    restartButton,
-    playerNameElement,
-    rankingListElement,
-    clearRankingButton,
-    config,
-  }) {
-    this.boardElement = boardElement;
-    this.attemptsElement = attemptsElement;
-    this.elapsedTimeElement = elapsedTimeElement;
-    this.accuracyElement = accuracyElement;
-    this.messageElement = messageElement;
-    this.restartButton = restartButton;
-    this.playerNameElement = playerNameElement;
-    this.rankingListElement = rankingListElement;
-    this.clearRankingButton = clearRankingButton;
-    this.config = config;
-    this.state = this.createInitialState();
-    this.flipBackTimerId = null;
-    this.timerIntervalId = null;
-    this.rankings = this.loadRankings();
-
-    this.handleBoardClick = this.handleBoardClick.bind(this);
-    this.resetGame = this.resetGame.bind(this);
-    this.handleClearRankings = this.handleClearRankings.bind(this);
-
-    this.attachEvents();
-    this.renderRankings();
-    this.resetGame();
-  }
-
-  createInitialState() {
-    // 새 게임을 시작할 때마다 이 기본 상태로 되돌아간다.
-    return {
-      cards: [],
-      flippedCardIds: [],
-      attempts: 0,
-      elapsedSeconds: 0,
-      hasStarted: false,
-      matchedPairs: 0,
-      isBoardLocked: false,
-    };
-  }
-
-  get totalPairs() {
-    return this.config.fruits.length;
-  }
-
-  attachEvents() {
-    // 카드마다 이벤트를 붙이지 않고 보드 하나에만 클릭 이벤트를 건다.
-    this.boardElement.addEventListener("click", this.handleBoardClick);
-    this.restartButton.addEventListener("click", this.resetGame);
-    this.clearRankingButton.addEventListener("click", this.handleClearRankings);
-  }
-
-  buildDeck() {
-    // 과일 8종을 2장씩 복제해서 4x4 덱을 만든다.
-    const duplicatedFruits = [...this.config.fruits, ...this.config.fruits];
-    const shuffledFruits = shuffle(duplicatedFruits);
-
-    return shuffledFruits.map((fruit, index) => ({
-      id: index,
-      fruit,
-      isFlipped: false,
-      isMatched: false,
-    }));
-  }
-
-  getCardById(cardId) {
-    return this.state.cards.find((card) => card.id === cardId);
-  }
-
-  updateCard(cardId, updates) {
-    // id가 같은 카드만 새 상태로 교체한다.
-    this.state.cards = this.state.cards.map((card) => (
-      card.id === cardId ? { ...card, ...updates } : card
-    ));
-  }
-
-  setMessage(text) {
-    this.messageElement.textContent = text;
-  }
-
-  getAccuracyPercentage() {
-    if (this.state.attempts === 0) {
-      return 0;
-    }
-
-    return (this.state.matchedPairs / this.state.attempts) * 100;
-  }
-
-  updateStatus() {
-    this.attemptsElement.textContent = String(this.state.attempts);
-    this.elapsedTimeElement.textContent = formatElapsedTime(this.state.elapsedSeconds);
-    this.accuracyElement.textContent = formatAccuracy(this.getAccuracyPercentage());
-  }
-
-  renderBoard() {
-    renderBoard(this.boardElement, this.state.cards, this.state.isBoardLocked);
-  }
-
-  render() {
-    this.updateStatus();
-    this.renderBoard();
-  }
-
-  clearPendingTimer() {
-    if (this.flipBackTimerId !== null) {
-      window.clearTimeout(this.flipBackTimerId);
+  class MemoryPuzzleGame {
+    constructor({
+      boardElement,
+      attemptsElement,
+      elapsedTimeElement,
+      accuracyElement,
+      messageElement,
+      restartButton,
+      difficultyButtons,
+      difficultySummaryElement,
+      boardSubtitleElement,
+      config,
+    }) {
+      this.boardElement = boardElement;
+      this.attemptsElement = attemptsElement;
+      this.elapsedTimeElement = elapsedTimeElement;
+      this.elapsedTimeCard = elapsedTimeElement.closest(".status-card");
+      this.accuracyElement = accuracyElement;
+      this.messageElement = messageElement;
+      this.restartButton = restartButton;
+      this.difficultyButtons = [...difficultyButtons];
+      this.difficultySummaryElement = difficultySummaryElement;
+      this.boardSubtitleElement = boardSubtitleElement;
+      this.config = config;
+      this.currentDifficultyKey = config.defaultDifficulty;
+      this.state = this.createInitialState();
       this.flipBackTimerId = null;
-    }
-  }
-
-  clearTimerInterval() {
-    if (this.timerIntervalId !== null) {
-      window.clearInterval(this.timerIntervalId);
       this.timerIntervalId = null;
+
+      this.handleBoardClick = this.handleBoardClick.bind(this);
+      this.handleDifficultyClick = this.handleDifficultyClick.bind(this);
+      this.resetGame = this.resetGame.bind(this);
+
+      this.attachEvents();
+      this.applyDifficulty(this.currentDifficultyKey);
     }
-  }
 
-  startTimer() {
-    if (this.state.hasStarted || this.timerIntervalId !== null) {
-      return;
+    get currentDifficulty() {
+      return this.config.difficulties[this.currentDifficultyKey];
     }
 
-    // 첫 카드 클릭 이후부터 1초마다 시간을 올린다.
-    this.state.hasStarted = true;
-    this.timerIntervalId = window.setInterval(() => {
-      this.state.elapsedSeconds += 1;
-      this.updateStatus();
-    }, 1000);
-  }
+    createInitialState() {
+      return {
+        cards: [],
+        flippedCardIds: [],
+        attempts: 0,
+        remainingSeconds: this.currentDifficulty.timeLimitSeconds,
+        hasStarted: false,
+        matchedPairs: 0,
+        isBoardLocked: false,
+        isGameOver: false,
+      };
+    }
 
-  stopTimer() {
-    this.clearTimerInterval();
-  }
+    get totalPairs() {
+      return (this.currentDifficulty.boardSize ** 2) / 2;
+    }
 
-  loadRankings() {
-    try {
-      // 브라우저를 새로 열어도 기록이 남도록 localStorage를 사용한다.
-      const savedRanking = window.localStorage.getItem(this.config.rankingStorageKey);
+    attachEvents() {
+      this.boardElement.addEventListener("click", this.handleBoardClick);
+      this.restartButton.addEventListener("click", this.resetGame);
+      this.difficultyButtons.forEach((button) => {
+        button.addEventListener("click", this.handleDifficultyClick);
+      });
+    }
 
-      if (!savedRanking) {
-        return [];
+    updateDifficultyButtons() {
+      this.difficultyButtons.forEach((button) => {
+        const isActive = button.dataset.difficulty === this.currentDifficultyKey;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-pressed", String(isActive));
+      });
+    }
+
+    updateDifficultyText() {
+      if (this.difficultySummaryElement) {
+        this.difficultySummaryElement.textContent = this.currentDifficulty.summary;
       }
 
-      const parsedRanking = JSON.parse(savedRanking);
-      return Array.isArray(parsedRanking) ? parsedRanking : [];
-    } catch (error) {
-      return [];
-    }
-  }
-
-  persistRankings() {
-    window.localStorage.setItem(
-      this.config.rankingStorageKey,
-      JSON.stringify(this.rankings),
-    );
-  }
-
-  sortRankings(rankings) {
-    // 우선순위: 적은 시도 횟수 -> 짧은 시간 -> 높은 정확도 -> 더 먼저 달성한 기록
-    return [...rankings].sort((left, right) => {
-      if (left.attempts !== right.attempts) {
-        return left.attempts - right.attempts;
+      if (this.boardSubtitleElement) {
+        this.boardSubtitleElement.textContent = this.currentDifficulty.boardSubtitle;
       }
-
-      if ((left.elapsedSeconds ?? Number.MAX_SAFE_INTEGER) !== (right.elapsedSeconds ?? Number.MAX_SAFE_INTEGER)) {
-        return (left.elapsedSeconds ?? Number.MAX_SAFE_INTEGER) - (right.elapsedSeconds ?? Number.MAX_SAFE_INTEGER);
-      }
-
-      if ((right.accuracy ?? 0) !== (left.accuracy ?? 0)) {
-        return (right.accuracy ?? 0) - (left.accuracy ?? 0);
-      }
-
-      return new Date(left.completedAt).getTime() - new Date(right.completedAt).getTime();
-    });
-  }
-
-  addRankingEntry() {
-    const playerName = sanitizePlayerName(this.playerNameElement.value);
-    this.playerNameElement.value = playerName;
-
-    const nextRankings = this.sortRankings([
-      ...this.rankings,
-      {
-        name: playerName,
-        attempts: this.state.attempts,
-        elapsedSeconds: this.state.elapsedSeconds,
-        accuracy: Math.round(this.getAccuracyPercentage()),
-        completedAt: new Date().toISOString(),
-      },
-    ]).slice(0, this.config.rankingLimit);
-
-    this.rankings = nextRankings;
-    this.persistRankings();
-    this.renderRankings();
-  }
-
-  renderRankings() {
-    this.rankingListElement.innerHTML = "";
-
-    if (this.rankings.length === 0) {
-      const emptyMessage = document.createElement("li");
-      emptyMessage.className = "ranking-empty";
-      emptyMessage.textContent = "아직 기록이 없습니다. 첫 클리어를 만들어 보세요.";
-      this.rankingListElement.appendChild(emptyMessage);
-      return;
     }
 
-    const fragment = document.createDocumentFragment();
-
-    this.rankings.forEach((entry) => {
-      const item = document.createElement("li");
-      item.className = "ranking-item";
-
-      const row = document.createElement("div");
-      row.className = "ranking-row";
-
-      const name = document.createElement("span");
-      name.className = "ranking-name";
-      name.textContent = entry.name;
-
-      const attempts = document.createElement("strong");
-      attempts.textContent = `${entry.attempts}회`;
-
-      const meta = document.createElement("div");
-      meta.className = "ranking-meta";
-      meta.textContent = `${formatElapsedTime(entry.elapsedSeconds ?? 0)} · ${formatAccuracy(entry.accuracy ?? 0)} · ${formatRankingDate(entry.completedAt)}`;
-
-      row.append(name, attempts);
-      item.append(row, meta);
-      fragment.appendChild(item);
-    });
-
-    this.rankingListElement.appendChild(fragment);
-  }
-
-  handleClearRankings() {
-    if (this.rankings.length === 0) {
-      this.rankingListElement.innerHTML = "";
-    }
-
-    this.rankings = [];
-    this.persistRankings();
-    this.renderRankings();
-  }
-
-  resetGame() {
-    this.clearPendingTimer();
-    this.clearTimerInterval();
-    this.state = {
-      ...this.createInitialState(),
-      cards: this.buildDeck(),
-    };
-
-    this.setMessage(this.config.message.idle);
-    this.render();
-  }
-
-  handleBoardClick(event) {
-    // 클릭된 실제 요소에서 가장 가까운 .card 버튼을 찾는다.
-    const cardElement = event.target.closest(".card");
-
-    if (!cardElement || !this.boardElement.contains(cardElement)) {
-      return;
-    }
-
-    const cardId = Number(cardElement.dataset.id);
-
-    if (cardId === this.state.cards.length - 1) {
-      this.handleCardSelection(cardId);
-      return;
-    }
-
-    this.handleCardSelection(cardId);
-  }
-
-  handleCardSelection(cardId) {
-    if (this.state.isBoardLocked) {
-      return;
-    }
-
-    const selectedCard = this.getCardById(cardId);
-
-    if (!selectedCard || selectedCard.isFlipped || selectedCard.isMatched) {
-      return;
-    }
-
-    this.startTimer();
-    this.updateCard(cardId, { isFlipped: true });
-    this.state.flippedCardIds = [...this.state.flippedCardIds, cardId];
-    this.renderBoard();
-
-    // 첫 번째 카드는 보여주기만 하고, 두 번째 카드가 선택되면 판정을 시작한다.
-    if (this.state.flippedCardIds.length === 1) {
-      this.setMessage(this.config.message.secondPick);
-      return;
-    }
-
-    this.resolveTurn();
-  }
-
-  resolveTurn() {
-    const [firstId, secondId] = this.state.flippedCardIds;
-    const firstCard = this.getCardById(firstId);
-    const secondCard = this.getCardById(secondId);
-
-    // 카드 2장을 뒤집은 시점을 1번의 시도로 계산한다.
-    this.state.attempts += 1;
-    this.state.isBoardLocked = true;
-    this.updateStatus();
-
-    if (firstCard && secondCard && firstCard.fruit === secondCard.fruit) {
-      this.resolveMatch(firstId, secondId);
-      return;
-    }
-
-    this.resolveMismatch(firstId, secondId);
-  }
-
-  resolveMatch(firstId, secondId) {
-    this.updateCard(firstId, { isMatched: true });
-    this.updateCard(secondId, { isMatched: true });
-
-    this.state.matchedPairs += 1;
-    this.state.flippedCardIds = [];
-    this.state.isBoardLocked = false;
-
-    if (this.state.matchedPairs === this.totalPairs) {
-      this.stopTimer();
-      this.addRankingEntry();
-      this.setMessage(
-        `축하합니다! ${this.state.attempts}번 시도, ${formatElapsedTime(this.state.elapsedSeconds)}, 정확도 ${formatAccuracy(this.getAccuracyPercentage())}로 완료했어요.`,
+    configureBoard() {
+      this.boardElement.style.setProperty("--board-columns", String(this.currentDifficulty.boardSize));
+      this.boardElement.setAttribute(
+        "aria-label",
+        `${this.currentDifficulty.boardSize}x${this.currentDifficulty.boardSize} 과일 짝맞추기 보드`,
       );
-      this.render();
-      return;
     }
 
-    this.setMessage(this.config.message.match);
-    this.render();
-  }
+    buildDeck() {
+      const activeFruits = this.config.fruits.slice(0, this.totalPairs);
+      const duplicatedFruits = [...activeFruits, ...activeFruits];
+      const shuffledFruits = shuffle(duplicatedFruits);
 
-  resolveMismatch(firstId, secondId) {
-    // 틀린 카드는 잠깐 보여준 뒤 다시 뒤집는다.
-    this.flipBackTimerId = window.setTimeout(() => {
-      this.updateCard(firstId, { isFlipped: false });
-      this.updateCard(secondId, { isFlipped: false });
+      return shuffledFruits.map((fruit, index) => ({
+        id: index,
+        fruit,
+        isFlipped: false,
+        isMatched: false,
+      }));
+    }
 
+    getCardById(cardId) {
+      return this.state.cards.find((card) => card.id === cardId);
+    }
+
+    updateCard(cardId, updates) {
+      this.state.cards = this.state.cards.map((card) => (
+        card.id === cardId ? { ...card, ...updates } : card
+      ));
+    }
+
+    setMessage(text) {
+      this.messageElement.textContent = text;
+    }
+
+    getAccuracyPercentage() {
+      if (this.state.attempts === 0) {
+        return 0;
+      }
+
+      return (this.state.matchedPairs / this.state.attempts) * 100;
+    }
+
+    updateTimerAppearance() {
+      if (!this.elapsedTimeCard) {
+        return;
+      }
+
+      this.elapsedTimeCard.classList.remove("is-warning", "is-danger");
+
+      if (this.state.remainingSeconds <= this.config.dangerTimeSeconds) {
+        this.elapsedTimeCard.classList.add("is-danger");
+        return;
+      }
+
+      if (this.state.remainingSeconds <= this.config.warningTimeSeconds) {
+        this.elapsedTimeCard.classList.add("is-warning");
+      }
+    }
+
+    updateStatus() {
+      this.attemptsElement.textContent = String(this.state.attempts);
+      this.elapsedTimeElement.textContent = formatElapsedTime(this.state.remainingSeconds);
+      this.accuracyElement.textContent = formatAccuracy(this.getAccuracyPercentage());
+      this.updateTimerAppearance();
+    }
+
+    renderBoard() {
+      renderBoard(this.boardElement, this.state.cards, this.state.isBoardLocked);
+    }
+
+    render() {
+      this.updateStatus();
+      this.renderBoard();
+    }
+
+    clearPendingTimer() {
+      if (this.flipBackTimerId !== null) {
+        window.clearTimeout(this.flipBackTimerId);
+        this.flipBackTimerId = null;
+      }
+    }
+
+    clearTimerInterval() {
+      if (this.timerIntervalId !== null) {
+        window.clearInterval(this.timerIntervalId);
+        this.timerIntervalId = null;
+      }
+    }
+
+    handleTimeExpired() {
+      this.clearPendingTimer();
+      this.clearTimerInterval();
+      this.state.flippedCardIds = [];
+      this.state.isBoardLocked = true;
+      this.state.isGameOver = true;
+      this.state.remainingSeconds = 0;
+      this.setMessage(this.config.message.timeout);
+      this.render();
+    }
+
+    startTimer() {
+      if (this.state.hasStarted || this.timerIntervalId !== null || this.state.isGameOver) {
+        return;
+      }
+
+      this.state.hasStarted = true;
+      this.timerIntervalId = window.setInterval(() => {
+        this.state.remainingSeconds -= 1;
+
+        if (this.state.remainingSeconds <= 0) {
+          this.handleTimeExpired();
+          return;
+        }
+
+        this.updateStatus();
+      }, 1000);
+    }
+
+    stopTimer() {
+      this.clearTimerInterval();
+    }
+
+    resetGame() {
+      this.clearPendingTimer();
+      this.clearTimerInterval();
+      this.state = {
+        ...this.createInitialState(),
+        cards: this.buildDeck(),
+      };
+
+      this.setMessage(this.config.message.idle);
+      this.render();
+    }
+
+    applyDifficulty(difficultyKey) {
+      if (!this.config.difficulties[difficultyKey]) {
+        return;
+      }
+
+      this.currentDifficultyKey = difficultyKey;
+      this.configureBoard();
+      this.updateDifficultyButtons();
+      this.updateDifficultyText();
+      this.resetGame();
+    }
+
+    handleDifficultyClick(event) {
+      const { difficulty } = event.currentTarget.dataset;
+
+      if (!difficulty || difficulty === this.currentDifficultyKey) {
+        return;
+      }
+
+      this.applyDifficulty(difficulty);
+    }
+
+    handleBoardClick(event) {
+      const cardElement = event.target.closest(".card");
+
+      if (!cardElement || !this.boardElement.contains(cardElement)) {
+        return;
+      }
+
+      const cardId = Number(cardElement.dataset.id);
+      this.handleCardSelection(cardId);
+    }
+
+    handleCardSelection(cardId) {
+      if (this.state.isBoardLocked || this.state.isGameOver || this.state.remainingSeconds <= 0) {
+        return;
+      }
+
+      const selectedCard = this.getCardById(cardId);
+
+      if (!selectedCard || selectedCard.isFlipped || selectedCard.isMatched) {
+        return;
+      }
+
+      this.startTimer();
+      this.updateCard(cardId, { isFlipped: true });
+      this.state.flippedCardIds = [...this.state.flippedCardIds, cardId];
+      this.renderBoard();
+
+      if (this.state.flippedCardIds.length === 1) {
+        this.setMessage(this.config.message.secondPick);
+        return;
+      }
+
+      this.resolveTurn();
+    }
+
+    resolveTurn() {
+      const [firstId, secondId] = this.state.flippedCardIds;
+      const firstCard = this.getCardById(firstId);
+      const secondCard = this.getCardById(secondId);
+
+      this.state.attempts += 1;
+      this.state.isBoardLocked = true;
+      this.updateStatus();
+
+      if (firstCard && secondCard && firstCard.fruit === secondCard.fruit) {
+        this.resolveMatch(firstId, secondId);
+        return;
+      }
+
+      this.resolveMismatch(firstId, secondId);
+    }
+
+    resolveMatch(firstId, secondId) {
+      this.updateCard(firstId, { isMatched: true });
+      this.updateCard(secondId, { isMatched: true });
+
+      this.state.matchedPairs += 1;
       this.state.flippedCardIds = [];
       this.state.isBoardLocked = false;
-      this.flipBackTimerId = null;
 
-      this.setMessage(this.config.message.mismatch);
-      this.renderBoard();
-    }, this.config.flipBackDelay);
+      if (this.state.matchedPairs === this.totalPairs) {
+        this.stopTimer();
+        this.state.isGameOver = true;
+        this.setMessage(
+          `완료! ${this.currentDifficulty.label} 난이도 클리어, ${this.state.attempts}번 시도, 남은 시간 ${formatElapsedTime(this.state.remainingSeconds)}, 정확도 ${formatAccuracy(this.getAccuracyPercentage())}`,
+        );
+        this.render();
+        return;
+      }
+
+      this.setMessage(this.config.message.match);
+      this.render();
+    }
+
+    resolveMismatch(firstId, secondId) {
+      this.flipBackTimerId = window.setTimeout(() => {
+        if (this.state.isGameOver) {
+          return;
+        }
+
+        this.updateCard(firstId, { isFlipped: false });
+        this.updateCard(secondId, { isFlipped: false });
+
+        this.state.flippedCardIds = [];
+        this.state.isBoardLocked = false;
+        this.flipBackTimerId = null;
+
+        this.setMessage(this.config.message.mismatch);
+        this.renderBoard();
+      }, this.config.flipBackDelay);
+    }
   }
-}
+
+  window.MemoryPuzzleGame = MemoryPuzzleGame;
+}());
